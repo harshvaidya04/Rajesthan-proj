@@ -1,4 +1,4 @@
-name: Build and Publish to Docker Hub
+name: Build, Push and Deploy to ECS
 
 on:
   push:
@@ -8,6 +8,11 @@ on:
 
 env:
   DOCKER_IMAGE_NAME: harshvaidya/rajesthan-marks-api
+  AWS_REGION: us-east-1                    # Change to your preferred region
+  ECS_CLUSTER: rajesthan-cluster           # Your ECS cluster name
+  ECS_SERVICE: rajesthan-api-service       # Your ECS service name
+  ECS_TASK_DEFINITION: rajesthan-task-def  # Your task definition name
+  CONTAINER_NAME: rajesthan-marks-api      # Container name in task definition
 
 jobs:
   build-and-push:
@@ -38,41 +43,67 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
           type=sha,prefix={{branch}}-
           
-    - name: Build Docker image
+    - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./Dockerfile
-        push: false
+        push: ${{ github.event_name != 'pull_request' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
         
     - name: Test Docker image
+      if: github.event_name != 'pull_request'
       run: |
         docker run --rm -d --name test-container -p 8000:8000 ${{ env.DOCKER_IMAGE_NAME }}:latest
-        sleep 10
+        sleep 15
         curl -f http://localhost:8000/docs || exit 1
         docker stop test-container
-        
-    - name: Push to Docker Hub
-      if: github.event_name != 'pull_request'
-      uses: docker/build-push-action@v5
+
+  deploy-to-ecs:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
       with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Download task definition
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+          --query taskDefinition > task-definition.json
         
-    - name: Docker Hub Description
-      if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-      uses: peter-evans/dockerhub-description@v4
+    - name: Update task definition with new image
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-        repository: ${{ env.DOCKER_IMAGE_NAME }}
-        short-description: "Rajesthan University Marks Transformation API - FastAPI application for converting student marks data"
+        task-definition: task-definition.json
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ env.DOCKER_IMAGE_NAME }}:latest
+
+    - name: Deploy to Amazon ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
+
+    - name: Verify deployment
+      run: |
+        echo "Deployment completed successfully!"
+        aws ecs describe-services \
+          --cluster ${{ env.ECS_CLUSTER }} \
+          --services ${{ env.ECS_SERVICE }} \
+          --query 'services[0].{ServiceName:serviceName,Status:status,RunningCount:runningCount,DesiredCount:desiredCount}'
