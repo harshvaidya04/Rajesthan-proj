@@ -8,7 +8,7 @@ on:
 
 env:
   DOCKER_IMAGE_NAME: harshvaidya/rajesthan-marks-api
-  AWS_REGION: us-east-1
+  AWS_REGION: ap-south-1
 
 jobs:
   build-and-push:
@@ -74,28 +74,34 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: List ECS resources for debugging
+    - name: List ECS resources in Mumbai region
       run: |
+        echo "=== Checking ECS resources in ap-south-1 (Mumbai) ==="
         echo "=== ECS CLUSTERS ==="
-        aws ecs list-clusters --query 'clusterArns[*]' --output table
+        aws ecs list-clusters --region ap-south-1 --query 'clusterArns[*]' --output table
         
         echo "=== TASK DEFINITIONS ==="
-        aws ecs list-task-definitions --query 'taskDefinitionArns[*]' --output table
+        aws ecs list-task-definitions --region ap-south-1 --query 'taskDefinitionArns[*]' --output table
         
         echo "=== SERVICES (if any clusters exist) ==="
-        CLUSTERS=$(aws ecs list-clusters --query 'clusterArns[*]' --output text)
+        CLUSTERS=$(aws ecs list-clusters --region ap-south-1 --query 'clusterArns[*]' --output text)
         for cluster in $CLUSTERS; do
           echo "Services in cluster: $cluster"
-          aws ecs list-services --cluster $cluster --query 'serviceArns[*]' --output table || echo "No services found"
+          aws ecs list-services --cluster $cluster --region ap-south-1 --query 'serviceArns[*]' --output table || echo "No services found"
         done
 
     - name: Find matching ECS resources
       id: find-resources
       run: |
-        # Find cluster with similar name
-        CLUSTER_ARN=$(aws ecs list-clusters --query "clusterArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
+        # Find cluster with similar name or get first cluster
+        CLUSTER_ARN=$(aws ecs list-clusters --region ap-south-1 --query "clusterArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
         if [ -z "$CLUSTER_ARN" ]; then
-          CLUSTER_ARN=$(aws ecs list-clusters --query 'clusterArns[0]' --output text)
+          CLUSTER_ARN=$(aws ecs list-clusters --region ap-south-1 --query 'clusterArns[0]' --output text)
+        fi
+        
+        if [ "$CLUSTER_ARN" = "None" ] || [ -z "$CLUSTER_ARN" ]; then
+          echo "No ECS clusters found in ap-south-1 region"
+          exit 1
         fi
         
         CLUSTER_NAME=$(echo $CLUSTER_ARN | awk -F'/' '{print $NF}')
@@ -103,9 +109,14 @@ jobs:
         echo "Found cluster: $CLUSTER_NAME"
         
         # Find task definition with similar name
-        TASK_DEF_ARN=$(aws ecs list-task-definitions --query "taskDefinitionArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
+        TASK_DEF_ARN=$(aws ecs list-task-definitions --region ap-south-1 --query "taskDefinitionArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
         if [ -z "$TASK_DEF_ARN" ]; then
-          TASK_DEF_ARN=$(aws ecs list-task-definitions --query 'taskDefinitionArns[0]' --output text)
+          TASK_DEF_ARN=$(aws ecs list-task-definitions --region ap-south-1 --query 'taskDefinitionArns[-1]' --output text)
+        fi
+        
+        if [ "$TASK_DEF_ARN" = "None" ] || [ -z "$TASK_DEF_ARN" ]; then
+          echo "No task definitions found in ap-south-1 region"
+          exit 1
         fi
         
         TASK_DEF_NAME=$(echo $TASK_DEF_ARN | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
@@ -113,9 +124,14 @@ jobs:
         echo "Found task definition: $TASK_DEF_NAME"
         
         # Find service with similar name
-        SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --query "serviceArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
+        SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --region ap-south-1 --query "serviceArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
         if [ -z "$SERVICE_ARN" ]; then
-          SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --query 'serviceArns[0]' --output text)
+          SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --region ap-south-1 --query 'serviceArns[0]' --output text)
+        fi
+        
+        if [ "$SERVICE_ARN" = "None" ] || [ -z "$SERVICE_ARN" ]; then
+          echo "No services found in cluster $CLUSTER_NAME"
+          exit 1
         fi
         
         SERVICE_NAME=$(echo $SERVICE_ARN | awk -F'/' '{print $NF}')
@@ -127,6 +143,7 @@ jobs:
         echo "=== TASK DEFINITION DETAILS ==="
         aws ecs describe-task-definition \
           --task-definition ${{ steps.find-resources.outputs.task-def-name }} \
+          --region ap-south-1 \
           --query 'taskDefinition.containerDefinitions[*].{Name:name,Image:image,Port:portMappings[0].containerPort}' \
           --output table
 
@@ -134,6 +151,7 @@ jobs:
       run: |
         aws ecs describe-task-definition \
           --task-definition ${{ steps.find-resources.outputs.task-def-name }} \
+          --region ap-south-1 \
           --query taskDefinition > task-definition.json
         
         echo "Task definition downloaded:"
@@ -169,6 +187,7 @@ jobs:
         aws ecs describe-services \
           --cluster ${{ steps.find-resources.outputs.cluster-name }} \
           --services ${{ steps.find-resources.outputs.service-name }} \
+          --region ap-south-1 \
           --query 'services[0].{ServiceName:serviceName,Status:status,TaskDefinition:taskDefinition,RunningCount:runningCount,DesiredCount:desiredCount}' \
           --output table
         
@@ -176,5 +195,6 @@ jobs:
         aws ecs list-tasks \
           --cluster ${{ steps.find-resources.outputs.cluster-name }} \
           --service-name ${{ steps.find-resources.outputs.service-name }} \
+          --region ap-south-1 \
           --query 'taskArns[*]' \
           --output table
