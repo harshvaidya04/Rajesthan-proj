@@ -8,11 +8,7 @@ on:
 
 env:
   DOCKER_IMAGE_NAME: harshvaidya/rajesthan-marks-api
-  AWS_REGION: us-east-1                    # Change to your preferred region
-  ECS_CLUSTER: rajesthan-cluster           # Your ECS cluster name
-  ECS_SERVICE: rajesthan-api-service       # Your ECS service name
-  ECS_TASK_DEFINITION: rajesthan-task-def  # Your task definition name
-  CONTAINER_NAME: rajesthan-marks-api      # Container name in task definition
+  AWS_REGION: us-east-1
 
 jobs:
   build-and-push:
@@ -78,32 +74,107 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
+    - name: List ECS resources for debugging
+      run: |
+        echo "=== ECS CLUSTERS ==="
+        aws ecs list-clusters --query 'clusterArns[*]' --output table
+        
+        echo "=== TASK DEFINITIONS ==="
+        aws ecs list-task-definitions --query 'taskDefinitionArns[*]' --output table
+        
+        echo "=== SERVICES (if any clusters exist) ==="
+        CLUSTERS=$(aws ecs list-clusters --query 'clusterArns[*]' --output text)
+        for cluster in $CLUSTERS; do
+          echo "Services in cluster: $cluster"
+          aws ecs list-services --cluster $cluster --query 'serviceArns[*]' --output table || echo "No services found"
+        done
+
+    - name: Find matching ECS resources
+      id: find-resources
+      run: |
+        # Find cluster with similar name
+        CLUSTER_ARN=$(aws ecs list-clusters --query "clusterArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
+        if [ -z "$CLUSTER_ARN" ]; then
+          CLUSTER_ARN=$(aws ecs list-clusters --query 'clusterArns[0]' --output text)
+        fi
+        
+        CLUSTER_NAME=$(echo $CLUSTER_ARN | awk -F'/' '{print $NF}')
+        echo "cluster-name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+        echo "Found cluster: $CLUSTER_NAME"
+        
+        # Find task definition with similar name
+        TASK_DEF_ARN=$(aws ecs list-task-definitions --query "taskDefinitionArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
+        if [ -z "$TASK_DEF_ARN" ]; then
+          TASK_DEF_ARN=$(aws ecs list-task-definitions --query 'taskDefinitionArns[0]' --output text)
+        fi
+        
+        TASK_DEF_NAME=$(echo $TASK_DEF_ARN | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
+        echo "task-def-name=$TASK_DEF_NAME" >> $GITHUB_OUTPUT
+        echo "Found task definition: $TASK_DEF_NAME"
+        
+        # Find service with similar name
+        SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --query "serviceArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
+        if [ -z "$SERVICE_ARN" ]; then
+          SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --query 'serviceArns[0]' --output text)
+        fi
+        
+        SERVICE_NAME=$(echo $SERVICE_ARN | awk -F'/' '{print $NF}')
+        echo "service-name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+        echo "Found service: $SERVICE_NAME"
+
+    - name: Get task definition details
+      run: |
+        echo "=== TASK DEFINITION DETAILS ==="
+        aws ecs describe-task-definition \
+          --task-definition ${{ steps.find-resources.outputs.task-def-name }} \
+          --query 'taskDefinition.containerDefinitions[*].{Name:name,Image:image,Port:portMappings[0].containerPort}' \
+          --output table
+
     - name: Download task definition
       run: |
         aws ecs describe-task-definition \
-          --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+          --task-definition ${{ steps.find-resources.outputs.task-def-name }} \
           --query taskDefinition > task-definition.json
+        
+        echo "Task definition downloaded:"
+        cat task-definition.json | jq '.containerDefinitions[].name'
+
+    - name: Find container name
+      id: find-container
+      run: |
+        # Get the first container name from task definition
+        CONTAINER_NAME=$(cat task-definition.json | jq -r '.containerDefinitions[0].name')
+        echo "container-name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+        echo "Found container name: $CONTAINER_NAME"
         
     - name: Update task definition with new image
       id: task-def
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
         task-definition: task-definition.json
-        container-name: ${{ env.CONTAINER_NAME }}
+        container-name: ${{ steps.find-container.outputs.container-name }}
         image: ${{ env.DOCKER_IMAGE_NAME }}:latest
 
     - name: Deploy to Amazon ECS
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
         task-definition: ${{ steps.task-def.outputs.task-definition }}
-        service: ${{ env.ECS_SERVICE }}
-        cluster: ${{ env.ECS_CLUSTER }}
+        service: ${{ steps.find-resources.outputs.service-name }}
+        cluster: ${{ steps.find-resources.outputs.cluster-name }}
         wait-for-service-stability: true
 
     - name: Verify deployment
       run: |
-        echo "Deployment completed successfully!"
+        echo "=== DEPLOYMENT VERIFICATION ==="
         aws ecs describe-services \
-          --cluster ${{ env.ECS_CLUSTER }} \
-          --services ${{ env.ECS_SERVICE }} \
-          --query 'services[0].{ServiceName:serviceName,Status:status,RunningCount:runningCount,DesiredCount:desiredCount}'
+          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
+          --services ${{ steps.find-resources.outputs.service-name }} \
+          --query 'services[0].{ServiceName:serviceName,Status:status,TaskDefinition:taskDefinition,RunningCount:runningCount,DesiredCount:desiredCount}' \
+          --output table
+        
+        echo "=== RUNNING TASKS ==="
+        aws ecs list-tasks \
+          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
+          --service-name ${{ steps.find-resources.outputs.service-name }} \
+          --query 'taskArns[*]' \
+          --output table
