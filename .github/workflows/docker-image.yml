@@ -74,112 +74,105 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
 
-    - name: List ECS resources in Mumbai region
-      run: |
-        echo "=== Checking ECS resources in ap-south-1 (Mumbai) ==="
-        echo "=== ECS CLUSTERS ==="
-        aws ecs list-clusters --region ap-south-1 --query 'clusterArns[*]' --output table
-        
-        echo "=== TASK DEFINITIONS ==="
-        aws ecs list-task-definitions --region ap-south-1 --query 'taskDefinitionArns[*]' --output table
-        
-        echo "=== SERVICES (if any clusters exist) ==="
-        CLUSTERS=$(aws ecs list-clusters --region ap-south-1 --query 'clusterArns[*]' --output text)
-        for cluster in $CLUSTERS; do
-          echo "Services in cluster: $cluster"
-          aws ecs list-services --cluster $cluster --region ap-south-1 --query 'serviceArns[*]' --output table || echo "No services found"
-        done
-
-    - name: Find matching ECS resources
+    - name: Find ECS resources
       id: find-resources
       run: |
-        # Find cluster with similar name or get first cluster
-        CLUSTER_ARN=$(aws ecs list-clusters --region ap-south-1 --query "clusterArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
-        if [ -z "$CLUSTER_ARN" ]; then
-          CLUSTER_ARN=$(aws ecs list-clusters --region ap-south-1 --query 'clusterArns[0]' --output text)
-        fi
-        
-        if [ "$CLUSTER_ARN" = "None" ] || [ -z "$CLUSTER_ARN" ]; then
-          echo "No ECS clusters found in ap-south-1 region"
-          exit 1
-        fi
-        
+        # Find cluster
+        CLUSTER_ARN=$(aws ecs list-clusters --region ap-south-1 --query 'clusterArns[0]' --output text)
         CLUSTER_NAME=$(echo $CLUSTER_ARN | awk -F'/' '{print $NF}')
         echo "cluster-name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
         echo "Found cluster: $CLUSTER_NAME"
         
-        # Find task definition with similar name
-        TASK_DEF_ARN=$(aws ecs list-task-definitions --region ap-south-1 --query "taskDefinitionArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
-        if [ -z "$TASK_DEF_ARN" ]; then
-          TASK_DEF_ARN=$(aws ecs list-task-definitions --region ap-south-1 --query 'taskDefinitionArns[-1]' --output text)
-        fi
-        
-        if [ "$TASK_DEF_ARN" = "None" ] || [ -z "$TASK_DEF_ARN" ]; then
-          echo "No task definitions found in ap-south-1 region"
-          exit 1
-        fi
-        
+        # Find task definition (get the latest)
+        TASK_DEF_ARN=$(aws ecs list-task-definitions --region ap-south-1 --query 'taskDefinitionArns[-1]' --output text)
         TASK_DEF_NAME=$(echo $TASK_DEF_ARN | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
         echo "task-def-name=$TASK_DEF_NAME" >> $GITHUB_OUTPUT
         echo "Found task definition: $TASK_DEF_NAME"
         
-        # Find service with similar name
-        SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --region ap-south-1 --query "serviceArns[?contains(@, 'rajesthan') || contains(@, 'marks') || contains(@, 'api')]" --output text | head -n1)
-        if [ -z "$SERVICE_ARN" ]; then
-          SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --region ap-south-1 --query 'serviceArns[0]' --output text)
-        fi
-        
-        if [ "$SERVICE_ARN" = "None" ] || [ -z "$SERVICE_ARN" ]; then
-          echo "No services found in cluster $CLUSTER_NAME"
-          exit 1
-        fi
-        
+        # Find service
+        SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --region ap-south-1 --query 'serviceArns[0]' --output text)
         SERVICE_NAME=$(echo $SERVICE_ARN | awk -F'/' '{print $NF}')
         echo "service-name=$SERVICE_NAME" >> $GITHUB_OUTPUT
         echo "Found service: $SERVICE_NAME"
 
-    - name: Get task definition details
+    - name: Download and clean task definition
       run: |
-        echo "=== TASK DEFINITION DETAILS ==="
+        # Download task definition
         aws ecs describe-task-definition \
           --task-definition ${{ steps.find-resources.outputs.task-def-name }} \
           --region ap-south-1 \
-          --query 'taskDefinition.containerDefinitions[*].{Name:name,Image:image,Port:portMappings[0].containerPort}' \
-          --output table
-
-    - name: Download task definition
-      run: |
-        aws ecs describe-task-definition \
-          --task-definition ${{ steps.find-resources.outputs.task-def-name }} \
-          --region ap-south-1 \
-          --query taskDefinition > task-definition.json
+          --query taskDefinition > original-task-definition.json
         
-        echo "Task definition downloaded:"
+        # Clean task definition by removing unsupported fields
+        cat original-task-definition.json | jq '
+          del(.taskDefinitionArn) |
+          del(.revision) |
+          del(.status) |
+          del(.requiresAttributes) |
+          del(.placementConstraints) |
+          del(.compatibilities) |
+          del(.registeredAt) |
+          del(.registeredBy) |
+          del(.enableFaultInjection) |
+          del(.containerDefinitions[].enableFaultInjection) |
+          del(.containerDefinitions[]?.repositoryCredentials) |
+          # Remove any other problematic fields
+          walk(if type == "object" then del(.enableFaultInjection) else . end)
+        ' > task-definition.json
+        
+        echo "Cleaned task definition:"
         cat task-definition.json | jq '.containerDefinitions[].name'
 
-    - name: Find container name
-      id: find-container
+    - name: Update image in task definition
       run: |
-        # Get the first container name from task definition
-        CONTAINER_NAME=$(cat task-definition.json | jq -r '.containerDefinitions[0].name')
-        echo "container-name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
-        echo "Found container name: $CONTAINER_NAME"
+        # Update the image for the rajesthan-marks container
+        cat task-definition.json | jq --arg IMAGE "${{ env.DOCKER_IMAGE_NAME }}:latest" '
+          .containerDefinitions = [
+            .containerDefinitions[] | 
+            if .name == "rajesthan-marks" then 
+              .image = $IMAGE 
+            else . 
+            end
+          ]
+        ' > updated-task-definition.json
         
-    - name: Update task definition with new image
-      id: task-def
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: task-definition.json
-        container-name: ${{ steps.find-container.outputs.container-name }}
-        image: ${{ env.DOCKER_IMAGE_NAME }}:latest
+        echo "Updated task definition with new image:"
+        cat updated-task-definition.json | jq '.containerDefinitions[] | {name: .name, image: .image}'
 
-    - name: Deploy to Amazon ECS
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-      with:
-        task-definition: ${{ steps.task-def.outputs.task-definition }}
-        service: ${{ steps.find-resources.outputs.service-name }}
-        cluster: ${{ steps.find-resources.outputs.cluster-name }}
-        wait-for-service-stability: true
+    - name: Register new task definition
+      id: register-task-def
+      run: |
+        # Register the updated task definition
+        NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+          --region ap-south-1 \
+          --cli-input-json file://updated-task-definition.json \
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+        
+        echo "task-def-arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
+        echo "Registered new task definition: $NEW_TASK_DEF_ARN"
+
+    - name: Update ECS service
+      run: |
+        # Update the service with the new task definition
+        aws ecs update-service \
+          --region ap-south-1 \
+          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
+          --service ${{ steps.find-resources.outputs.service-name }} \
+          --task-definition ${{ steps.register-task-def.outputs.task-def-arn }} \
+          --force-new-deployment
+        
+        echo "Service update initiated"
+
+    - name: Wait for deployment stability
+      run: |
+        echo "Waiting for service to reach stable state..."
+        aws ecs wait services-stable \
+          --region ap-south-1 \
+          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
+          --services ${{ steps.find-resources.outputs.service-name }}
+        
+        echo "Service deployment completed!"
 
     - name: Verify deployment
       run: |
@@ -192,9 +185,24 @@ jobs:
           --output table
         
         echo "=== RUNNING TASKS ==="
-        aws ecs list-tasks \
+        TASKS=$(aws ecs list-tasks \
           --cluster ${{ steps.find-resources.outputs.cluster-name }} \
           --service-name ${{ steps.find-resources.outputs.service-name }} \
           --region ap-south-1 \
           --query 'taskArns[*]' \
-          --output table
+          --output text)
+        
+        if [ ! -z "$TASKS" ]; then
+          aws ecs describe-tasks \
+            --cluster ${{ steps.find-resources.outputs.cluster-name }} \
+            --region ap-south-1 \
+            --tasks $TASKS \
+            --query 'tasks[*].{TaskArn:taskArn,LastStatus:lastStatus,HealthStatus:healthStatus}' \
+            --output table
+        fi
+        
+        echo "=== DEPLOYMENT SUMMARY ==="
+        echo "✅ Docker image built and pushed to Docker Hub"
+        echo "✅ New ECS task definition registered: ${{ steps.register-task-def.outputs.task-def-arn }}"
+        echo "✅ ECS service updated with new task definition"
+        echo "✅ Deployment completed successfully!"
