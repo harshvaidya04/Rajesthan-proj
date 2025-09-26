@@ -137,6 +137,8 @@ def transform_row(row, passing_scheme="scheme1"):
     else:
         new_row["GRAND_TOT_MRKS"] = grand_tot
         new_row["GRAND_TOT_MAX"] = row.get("TTOT", "")
+    
+    new_row["TOT_MRKS"] = row.get("GTOT", "")
 
     new_row["PERCENT"] = row.get("PER", "")
     new_row["ABC_ACCOUNT_ID"] = row.get("ABCID", "")
@@ -197,8 +199,8 @@ def transform_row(row, passing_scheme="scheme1"):
         # Common subject fields
         new_row[f"SUB{sub_idx}NM"] = sub_detail
         new_row[f"SUB{sub_idx}"] = sub_code
-        new_row[f"SUB{sub_idx}_PR_MAX"] = ""
-        new_row[f"SUB{sub_idx}_PR_MRKS"] = ""
+        new_row[f"SUB{sub_idx}_PR_MAX"] = total_max_marks if use_total_max else ""
+        new_row[f"SUB{sub_idx}_PR_MRKS"] = calculated_total if use_total_max else ""
         new_row[f"SUB{sub_idx}_TOT"] = calculated_total
         new_row[f"SUB{sub_idx}_GRADE"] = ""
         new_row[f"SUB{sub_idx}_GRADE_POINTS"] = ""
