@@ -474,3 +474,7 @@ async def transform_marks(course: str = Form(...), file: UploadFile = File(...))
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
