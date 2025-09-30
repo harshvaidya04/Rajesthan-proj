@@ -53,9 +53,9 @@ jobs:
     - name: Test Docker image
       if: github.event_name != 'pull_request'
       run: |
-        docker run --rm -d --name test-container -p 8050:8050 ${{ env.DOCKER_IMAGE_NAME }}:latest
+        docker run --rm -d --name test-container -p 8000:8000 ${{ env.DOCKER_IMAGE_NAME }}:latest
         sleep 15
-        curl -f http://localhost:8050/health || exit 1
+        curl -f http://localhost:8000/health || exit 1
         docker stop test-container
 
   deploy-to-ecs:
@@ -116,11 +116,11 @@ jobs:
           del(.enableFaultInjection) |
           del(.containerDefinitions[].enableFaultInjection) |
           del(.containerDefinitions[]?.repositoryCredentials) |
-          # Update port mappings to use 8050
+          # Update port mappings to use 8000
           .containerDefinitions = [
             .containerDefinitions[] |
             if .portMappings then
-              .portMappings = [.portMappings[] | .containerPort = 8050]
+              .portMappings = [.portMappings[] | .containerPort = 8000]
             else . end
           ] |
           # Remove any other problematic fields
@@ -143,7 +143,7 @@ jobs:
           ]
         ' > updated-task-definition.json
         
-        echo "Updated task definition with new image and port 8050:"
+        echo "Updated task definition with new image and port 8000:"
         cat updated-task-definition.json | jq '.containerDefinitions[] | {name: .name, image: .image, ports: .portMappings}'
 
     - name: Register new task definition
@@ -169,7 +169,7 @@ jobs:
           --task-definition ${{ steps.register-task-def.outputs.task-def-arn }} \
           --force-new-deployment
         
-        echo "Service update initiated with port 8050"
+        echo "Service update initiated with port 8000"
 
     - name: Wait for deployment stability
       run: |
@@ -209,7 +209,7 @@ jobs:
         fi
         
         echo "=== PORT VERIFICATION ==="
-        echo "Checking if containers are running on port 8050..."
+        echo "Checking if containers are running on port 8000..."
         aws ecs describe-task-definition \
           --task-definition ${{ steps.register-task-def.outputs.task-def-arn }} \
           --region ap-south-1 \
