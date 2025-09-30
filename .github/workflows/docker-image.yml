@@ -53,9 +53,9 @@ jobs:
     - name: Test Docker image
       if: github.event_name != 'pull_request'
       run: |
-        docker run --rm -d --name test-container -p 8000:8000 ${{ env.DOCKER_IMAGE_NAME }}:latest
+        docker run --rm -d --name test-container -p 8050:8050 ${{ env.DOCKER_IMAGE_NAME }}:latest
         sleep 15
-        curl -f http://localhost:8000/docs || exit 1
+        curl -f http://localhost:8050/health || exit 1
         docker stop test-container
 
   deploy-to-ecs:
@@ -103,7 +103,7 @@ jobs:
           --region ap-south-1 \
           --query taskDefinition > original-task-definition.json
         
-        # Clean task definition by removing unsupported fields
+        # Clean task definition by removing unsupported fields and update port mapping
         cat original-task-definition.json | jq '
           del(.taskDefinitionArn) |
           del(.revision) |
@@ -116,12 +116,19 @@ jobs:
           del(.enableFaultInjection) |
           del(.containerDefinitions[].enableFaultInjection) |
           del(.containerDefinitions[]?.repositoryCredentials) |
+          # Update port mappings to use 8050
+          .containerDefinitions = [
+            .containerDefinitions[] |
+            if .portMappings then
+              .portMappings = [.portMappings[] | .containerPort = 8050]
+            else . end
+          ] |
           # Remove any other problematic fields
           walk(if type == "object" then del(.enableFaultInjection) else . end)
         ' > task-definition.json
         
-        echo "Cleaned task definition:"
-        cat task-definition.json | jq '.containerDefinitions[].name'
+        echo "Cleaned task definition with updated ports:"
+        cat task-definition.json | jq '.containerDefinitions[] | {name: .name, ports: .portMappings}'
 
     - name: Update image in task definition
       run: |
@@ -136,8 +143,8 @@ jobs:
           ]
         ' > updated-task-definition.json
         
-        echo "Updated task definition with new image:"
-        cat updated-task-definition.json | jq '.containerDefinitions[] | {name: .name, image: .image}'
+        echo "Updated task definition with new image and port 8050:"
+        cat updated-task-definition.json | jq '.containerDefinitions[] | {name: .name, image: .image, ports: .portMappings}'
 
     - name: Register new task definition
       id: register-task-def
@@ -162,7 +169,7 @@ jobs:
           --task-definition ${{ steps.register-task-def.outputs.task-def-arn }} \
           --force-new-deployment
         
-        echo "Service update initiated"
+        echo "Service update initiated with port 8050"
 
     - name: Wait for deployment stability
       run: |
@@ -200,6 +207,14 @@ jobs:
             --query 'tasks[*].{TaskArn:taskArn,LastStatus:lastStatus,HealthStatus:healthStatus}' \
             --output table
         fi
+        
+        echo "=== PORT VERIFICATION ==="
+        echo "Checking if containers are running on port 8050..."
+        aws ecs describe-task-definition \
+          --task-definition ${{ steps.register-task-def.outputs.task-def-arn }} \
+          --region ap-south-1 \
+          --query 'taskDefinition.containerDefinitions[*].portMappings[*].containerPort' \
+          --output table
         
         echo "=== DEPLOYMENT SUMMARY ==="
         echo "✅ Docker image built and pushed to Docker Hub"
