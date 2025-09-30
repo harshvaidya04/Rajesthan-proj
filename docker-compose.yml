@@ -7,15 +7,14 @@ services:
       dockerfile: Dockerfile
     container_name: rajesthan-marks-api
     ports:
-      - "8000:8000"
+      - "8050:8050"  # Changed from 8000:8000
     environment:
       - PYTHONPATH=/app
     volumes:
-      # Mount for development (comment out for production)
       - .:/app
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      test: ["CMD", "curl", "-f", "http://localhost:8050/docs"]  # Changed port and endpoint
       interval: 30s
       timeout: 10s
       retries: 3
