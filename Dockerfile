@@ -32,11 +32,11 @@ RUN adduser --disabled-password --gecos '' appuser && \
 USER appuser
 
 # Expose port
-EXPOSE 8050
+EXPOSE 8000
 
-# Health check - Updated to port 8050
+# Health check - Updated to port 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8050/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Command to run the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8050"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
