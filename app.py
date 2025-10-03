@@ -14,7 +14,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["rvp.evalvotech.com"],
+    allow_origins=["rvpuni.in"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
