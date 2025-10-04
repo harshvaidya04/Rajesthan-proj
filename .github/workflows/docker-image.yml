@@ -1,223 +1,44 @@
-name: Build, Push and Deploy to ECS
+name: Deploy to EC2
 
 on:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
-
-env:
-  DOCKER_IMAGE_NAME: harshvaidya/rajesthan-marks-api
-  AWS_REGION: ap-south-1
 
 jobs:
-  build-and-push:
+  deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      
-    - name: Login to Docker Hub
-      if: github.event_name != 'pull_request'
-      uses: docker/login-action@v3
+
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.9.0
       with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-    
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.DOCKER_IMAGE_NAME }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=raw,value=latest,enable={{is_default_branch}}
-          type=sha,prefix={{branch}}-
-          
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: ${{ github.event_name != 'pull_request' }}
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        
-    - name: Test Docker image
-      if: github.event_name != 'pull_request'
-      run: |
-        docker run --rm -d --name test-container -p 8000:8000 ${{ env.DOCKER_IMAGE_NAME }}:latest
-        sleep 15
-        curl -f http://localhost:8000/health || exit 1
-        docker stop test-container
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-  deploy-to-ecs:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
-
-    - name: Find ECS resources
-      id: find-resources
+    - name: Add EC2 to known hosts
       run: |
-        # Find cluster
-        CLUSTER_ARN=$(aws ecs list-clusters --region ap-south-1 --query 'clusterArns[0]' --output text)
-        CLUSTER_NAME=$(echo $CLUSTER_ARN | awk -F'/' '{print $NF}')
-        echo "cluster-name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
-        echo "Found cluster: $CLUSTER_NAME"
-        
-        # Find task definition (get the latest)
-        TASK_DEF_ARN=$(aws ecs list-task-definitions --region ap-south-1 --query 'taskDefinitionArns[-1]' --output text)
-        TASK_DEF_NAME=$(echo $TASK_DEF_ARN | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
-        echo "task-def-name=$TASK_DEF_NAME" >> $GITHUB_OUTPUT
-        echo "Found task definition: $TASK_DEF_NAME"
-        
-        # Find service
-        SERVICE_ARN=$(aws ecs list-services --cluster $CLUSTER_NAME --region ap-south-1 --query 'serviceArns[0]' --output text)
-        SERVICE_NAME=$(echo $SERVICE_ARN | awk -F'/' '{print $NF}')
-        echo "service-name=$SERVICE_NAME" >> $GITHUB_OUTPUT
-        echo "Found service: $SERVICE_NAME"
+        ssh-keyscan -H 13.201.147.131 >> ~/.ssh/known_hosts
 
-    - name: Download and clean task definition
+    - name: Deploy to EC2
       run: |
-        # Download task definition
-        aws ecs describe-task-definition \
-          --task-definition ${{ steps.find-resources.outputs.task-def-name }} \
-          --region ap-south-1 \
-          --query taskDefinition > original-task-definition.json
-        
-        # Clean task definition by removing unsupported fields and update port mapping
-        cat original-task-definition.json | jq '
-          del(.taskDefinitionArn) |
-          del(.revision) |
-          del(.status) |
-          del(.requiresAttributes) |
-          del(.placementConstraints) |
-          del(.compatibilities) |
-          del(.registeredAt) |
-          del(.registeredBy) |
-          del(.enableFaultInjection) |
-          del(.containerDefinitions[].enableFaultInjection) |
-          del(.containerDefinitions[]?.repositoryCredentials) |
-          # Update port mappings to use 8000
-          .containerDefinitions = [
-            .containerDefinitions[] |
-            if .portMappings then
-              .portMappings = [.portMappings[] | .containerPort = 8000]
-            else . end
-          ] |
-          # Remove any other problematic fields
-          walk(if type == "object" then del(.enableFaultInjection) else . end)
-        ' > task-definition.json
-        
-        echo "Cleaned task definition with updated ports:"
-        cat task-definition.json | jq '.containerDefinitions[] | {name: .name, ports: .portMappings}'
+        ssh root@13.201.147.131 << 'EOF'
+          cd /var/www/html/Rajesthan-proj   # adjust path if needed
+          git fetch origin
+          git reset --hard origin/main      # or origin/master if that's your branch
 
-    - name: Update image in task definition
-      run: |
-        # Update the image for the rajesthan-marks container
-        cat task-definition.json | jq --arg IMAGE "${{ env.DOCKER_IMAGE_NAME }}:latest" '
-          .containerDefinitions = [
-            .containerDefinitions[] | 
-            if .name == "rajesthan-marks" then 
-              .image = $IMAGE 
-            else . 
-            end
-          ]
-        ' > updated-task-definition.json
-        
-        echo "Updated task definition with new image and port 8000:"
-        cat updated-task-definition.json | jq '.containerDefinitions[] | {name: .name, image: .image, ports: .portMappings}'
+          # Install dependencies (Python example: pip, Node example: npm)
+          if [ -f package.json ]; then
+            npm install --production
+          elif [ -f requirements.txt ]; then
+            source /var/www/html/myevn/bin/activate
+            pip install -r requirements.txt
+          fi
 
-    - name: Register new task definition
-      id: register-task-def
-      run: |
-        # Register the updated task definition
-        NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
-          --region ap-south-1 \
-          --cli-input-json file://updated-task-definition.json \
-          --query 'taskDefinition.taskDefinitionArn' \
-          --output text)
-        
-        echo "task-def-arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
-        echo "Registered new task definition: $NEW_TASK_DEF_ARN"
+          # Restart the PM2 process named "backend"
+          pm2 restart backend
 
-    - name: Update ECS service
-      run: |
-        # Update the service with the new task definition
-        aws ecs update-service \
-          --region ap-south-1 \
-          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
-          --service ${{ steps.find-resources.outputs.service-name }} \
-          --task-definition ${{ steps.register-task-def.outputs.task-def-arn }} \
-          --force-new-deployment
-        
-        echo "Service update initiated with port 8000"
-
-    - name: Wait for deployment stability
-      run: |
-        echo "Waiting for service to reach stable state..."
-        aws ecs wait services-stable \
-          --region ap-south-1 \
-          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
-          --services ${{ steps.find-resources.outputs.service-name }}
-        
-        echo "Service deployment completed!"
-
-    - name: Verify deployment
-      run: |
-        echo "=== DEPLOYMENT VERIFICATION ==="
-        aws ecs describe-services \
-          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
-          --services ${{ steps.find-resources.outputs.service-name }} \
-          --region ap-south-1 \
-          --query 'services[0].{ServiceName:serviceName,Status:status,TaskDefinition:taskDefinition,RunningCount:runningCount,DesiredCount:desiredCount}' \
-          --output table
-        
-        echo "=== RUNNING TASKS ==="
-        TASKS=$(aws ecs list-tasks \
-          --cluster ${{ steps.find-resources.outputs.cluster-name }} \
-          --service-name ${{ steps.find-resources.outputs.service-name }} \
-          --region ap-south-1 \
-          --query 'taskArns[*]' \
-          --output text)
-        
-        if [ ! -z "$TASKS" ]; then
-          aws ecs describe-tasks \
-            --cluster ${{ steps.find-resources.outputs.cluster-name }} \
-            --region ap-south-1 \
-            --tasks $TASKS \
-            --query 'tasks[*].{TaskArn:taskArn,LastStatus:lastStatus,HealthStatus:healthStatus}' \
-            --output table
-        fi
-        
-        echo "=== PORT VERIFICATION ==="
-        echo "Checking if containers are running on port 8000..."
-        aws ecs describe-task-definition \
-          --task-definition ${{ steps.register-task-def.outputs.task-def-arn }} \
-          --region ap-south-1 \
-          --query 'taskDefinition.containerDefinitions[*].portMappings[*].containerPort' \
-          --output table
-        
-        echo "=== DEPLOYMENT SUMMARY ==="
-        echo "✅ Docker image built and pushed to Docker Hub"
-        echo "✅ New ECS task definition registered: ${{ steps.register-task-def.outputs.task-def-arn }}"
-        echo "✅ ECS service updated with new task definition"
-        echo "✅ Deployment completed successfully!"
+          # Save PM2 state so it survives reboot
+          pm2 save
+        EOF
