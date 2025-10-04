@@ -19,11 +19,11 @@ jobs:
 
     - name: Add EC2 to known hosts
       run: |
-        ssh-keyscan -H 13.201.147.131 >> ~/.ssh/known_hosts
+        ssh-keyscan -H 13.235.120.164 >> ~/.ssh/known_hosts
 
     - name: Deploy to EC2
       run: |
-        ssh -o StrictHostKeyChecking=no ubuntu@13.201.147.131 << 'EOF'
+        ssh -o StrictHostKeyChecking=no ubuntu@13.235.120.164 << 'EOF'
           cd /var/www/html/Rajesthan-proj || exit 1
 
           # Ensure we are on the right branch
