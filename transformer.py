@@ -3,9 +3,15 @@ from typing import Dict, Any, Tuple
 import datetime
 
 # --------------------------
-# Scheme Configuration
+# Configuration Section: Defines grading schemes for different courses
+# Each scheme specifies:
+# - theory_passing: Minimum percentage required to pass theory subjects
+# - practical_passing: Minimum percentage required to pass practical subjects
+# - aggregate_passing: Overall passing percentage required
+# - courses: List of courses that follow this scheme
 # --------------------------
 SCHEME_CONFIG = {
+    # Scheme 1: Standard passing criteria (36/40/40)
     "scheme1": {
         "theory_passing": 36,
         "practical_passing": 40,
@@ -16,6 +22,7 @@ SCHEME_CONFIG = {
             "M.Ed."
         ]
     },
+    # Scheme 2: Modified practical criteria (36/36/40)
     "scheme2": {
         "theory_passing": 36,
         "practical_passing": 36,
@@ -33,36 +40,42 @@ SCHEME_CONFIG = {
             "M.Sc. ZOOLOGY", "MASTER OF SOCIAL WORK"
         ]
     },
+    # Scheme 3: Higher passing criteria (40/50/50)
     "scheme3": {
         "theory_passing": 40,
         "practical_passing": 50,
         "aggregate_passing": 50,
         "courses": ["M.Sc. COMPUTER SCIENCE", "BCA", "MCA", "MHRM", "PGDCA", "B.Sc.-DATA SCIENCE"] 
     },
+    # Scheme 4: Business courses (BBA/MBA) with standard passing criteria
     "scheme4": {
         "theory_passing": 40,
         "practical_passing": 40,
         "aggregate_passing": 50,
         "courses": ["BBA", "MBA"]  
     },
+    # Scheme 5: Specialized BBA TT course
     "scheme5": {
         "theory_passing": 40,
         "practical_passing": 40,
         "aggregate_passing": 45,
         "courses": ["BBA TT"] 
     },
+    # Scheme 6: Physiotherapy course (BPT) with higher passing marks
     "scheme6": {
         "theory_passing": 50,
         "practical_passing": 50,
         "aggregate_passing": 50,
         "courses": ["BPT"]
     },
+    # Scheme 7: Agriculture MSc with highest passing criteria
     "scheme7": {
         "theory_passing": 60,
         "practical_passing": 60,
         "aggregate_passing": 60,
         "courses": ["M.Sc. Agriculture"] 
     },
+    # Scheme 8: Specialized diploma in Criminal Laws and Forensic Science
     "scheme8": {
         "theory_passing": 40,
         "practical_passing": 40,
@@ -74,7 +87,16 @@ SCHEME_CONFIG = {
 
 def get_scheme_for_course(course: str) -> Tuple[str, Dict[str, Any]]:
     """
-    Returns the scheme name and configuration for a given course.
+    Maps a course to its grading scheme configuration.
+    
+    Args:
+        course (str): The name of the course
+        
+    Returns:
+        Tuple[str, Dict[str, Any]]: Scheme name and its configuration
+        
+    Raises:
+        ValueError: If course is not found in any scheme
     """
     for scheme_name, config in SCHEME_CONFIG.items():
         if course in config["courses"]:
@@ -82,49 +104,30 @@ def get_scheme_for_course(course: str) -> Tuple[str, Dict[str, Any]]:
     raise ValueError(f"Course '{course}' not found in any scheme configuration")
 
 
-def compute_grade_and_points(marks, th_max="", ce_max="", pr_max="", total_max="", 
-                            grace=0, is_practical=False, scheme_config=None):
+def compute_grade_and_points(percent_marks, is_practical=False, scheme_config=None):
     """
-    Compute grade and grade points based on marks and scheme configuration.
+    Calculates grade letter and grade points based on percentage marks.
+    
+    Args:
+        percent_marks: Percentage marks (0-100)
+        is_practical: Whether this is a practical subject
+        scheme_config: Grading scheme configuration to use
+        
+    Returns:
+        Tuple[str, int]: Grade letter and grade points
     """
     if scheme_config is None:
         scheme_config = SCHEME_CONFIG["scheme1"]
     
-    if str(marks).strip().upper() == "AB":
+    if str(percent_marks).strip().upper() == "AB":
         return "AB", 0
 
     try:
-        marks = float(marks)
+        percent = float(percent_marks)
     except:
         return "", 0
 
-    if is_practical:
-        percent = marks + grace
-        min_passing = scheme_config["practical_passing"]
-    else:
-        if total_max and str(total_max).strip() not in ["", "nan", "None"]:
-            try:
-                total_max = float(total_max)
-                if total_max > 0:
-                    percent = ((marks + grace) / total_max) * 100
-                else:
-                    return "", 0
-            except:
-                return "", 0
-        else:
-            total_max = 0
-            for val in [th_max, ce_max, pr_max]:
-                try:
-                    if str(val).strip() not in ["", "nan", "None"]:
-                        total_max += float(val)
-                except:
-                    pass
-
-            if total_max <= 0:
-                return "", 0
-
-            percent = ((marks + grace) / total_max) * 100
-        min_passing = scheme_config["theory_passing"]
+    min_passing = scheme_config["practical_passing"] if is_practical else scheme_config["theory_passing"]
 
     # Grade calculation (standard 10-point scale)
     if percent >= 91: return "O", 10
@@ -138,7 +141,14 @@ def compute_grade_and_points(marks, th_max="", ce_max="", pr_max="", total_max="
 
 
 def format_dob(dob) -> str:
-    """Format DOB to dd/mm/yyyy format."""
+    """
+    Standardizes date of birth format to dd/mm/yyyy.
+    Handles various input formats:
+        - yyyy/mm/dd
+        - dd/mm/yyyy
+        - yyyy-mm-dd
+        - datetime objects
+    """
     if not dob or str(dob).strip() == "":
         return ""
     
@@ -174,7 +184,21 @@ def format_dob(dob) -> str:
 
 def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Transform a single row of marks data according to the scheme configuration.
+    Transforms a single student record according to the specified grading scheme.
+    
+    Key operations:
+    1. Maps basic student information
+    2. Processes theory subjects with grace marks
+    3. Processes practical subjects
+    4. Handles project marks if present
+    5. Calculates SGPA and final result
+    
+    Args:
+        row: Dictionary containing raw student data
+        scheme_config: Grading scheme configuration to apply
+        
+    Returns:
+        Dict[str, Any]: Transformed student record with grades and results
     """
     new_row = {}
 
@@ -208,12 +232,11 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
     
     new_row["TOT_MRKS"] = row.get("GTOT", "")
     new_row["PERCENT"] = row.get("PER", "")
-    new_row["ABC_ACCOUNT_ID"] = row.get("ABCID", "")
+    new_row["ABC_ACCOUNT_ID"] = row.get("ABCID", "") or row.get("ABC_ACCOUNT_ID", "")
     new_row["YEAR"] = row.get("YEAR", "")
     new_row["MONTH"] = row.get("MONTH", "")
     new_row["SEM"] = row.get("SEM", "")
     new_row["EXAM_TYPE"] = row.get("CAT", "")
-    new_row["TERM_TYPE"] = "Semester"
 
     subject_counter = 1
     theory_subjects = []
@@ -264,7 +287,8 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         new_row[f"SUB{sub_idx}"] = sub_code
         new_row[f"SUB{sub_idx}_PR_MAX"] = total_max_marks if use_total_max else ""
         new_row[f"SUB{sub_idx}_PR_MRKS"] = calculated_total if use_total_max else ""
-        new_row[f"SUB{sub_idx}_TOT"] = calculated_total
+        new_row[f"SUB{sub_idx}_TOT"] = calculated_total  # Store raw marks
+        new_row[f"SUB{sub_idx}_PERCENT"] = (calculated_total / max_marks_for_calculation) * 100 if max_marks_for_calculation > 0 else 0  # Store percentage
         new_row[f"SUB{sub_idx}_GRADE"] = ""
         new_row[f"SUB{sub_idx}_GRADE_POINTS"] = ""
         new_row[f"SUB{sub_idx}_CREDIT"] = row.get(f"CH{sub_idx}", "")
@@ -294,26 +318,30 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
                     converted_marks = (pract_marks / pract_max) * 100
                     new_row[f"SUB{sub_idx}_PR_MRKS"] = parts[0].strip()
                     new_row[f"SUB{sub_idx}_PR_MAX"] = parts[1].strip()
-                    new_row[f"SUB{sub_idx}_TOT"] = round(converted_marks, 2) if pd.notna(converted_marks) else ""
+                    new_row[f"SUB{sub_idx}_TOT"] = pract_marks  # Store raw marks
+                    new_row[f"SUB{sub_idx}_PERCENT"] = round(converted_marks, 2) if pd.notna(converted_marks) else ""  # Store percentage
                     pract_marks_raw = pract_marks
                     pract_max_raw = pract_max
                 except:
                     new_row[f"SUB{sub_idx}_PR_MRKS"] = parts[0].strip()
                     new_row[f"SUB{sub_idx}_PR_MAX"] = parts[1].strip()
                     new_row[f"SUB{sub_idx}_TOT"] = parts[0].strip()
+                    new_row[f"SUB{sub_idx}_PERCENT"] = parts[0].strip()
             else:
                 try:
                     pract_marks = pd.to_numeric(pract_tot, errors="coerce")
                     converted_marks = (pract_marks / 50) * 100
                     new_row[f"SUB{sub_idx}_PR_MRKS"] = pract_tot
                     new_row[f"SUB{sub_idx}_PR_MAX"] = 50
-                    new_row[f"SUB{sub_idx}_TOT"] = round(converted_marks, 2) if pd.notna(converted_marks) else ""
+                    new_row[f"SUB{sub_idx}_TOT"] = pract_marks  # Store raw marks
+                    new_row[f"SUB{sub_idx}_PERCENT"] = round(converted_marks, 2) if pd.notna(converted_marks) else ""  # Store percentage
                     pract_marks_raw = pract_marks
                     pract_max_raw = 50
                 except:
                     new_row[f"SUB{sub_idx}_PR_MRKS"] = pract_tot
                     new_row[f"SUB{sub_idx}_PR_MAX"] = 50
                     new_row[f"SUB{sub_idx}_TOT"] = pract_tot
+                    new_row[f"SUB{sub_idx}_PERCENT"] = pract_tot
 
             new_row[f"SUB{sub_idx}_TH_MAX"] = ""
             new_row[f"SUB{sub_idx}_CE_MAX"] = ""
@@ -395,7 +423,8 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
             new_row[f"SUB{sub_idx}_CE_MRKS"] = iap_marks if str(iap_marks).strip() not in ["", "None"] else ""
             new_row[f"SUB{sub_idx}_PR_MAX"] = p_max if str(p_max).strip() not in ["", "nan", "None"] else total_max
             new_row[f"SUB{sub_idx}_PR_MRKS"] = calculated_total_p
-            new_row[f"SUB{sub_idx}_TOT"] = percent_marks
+            new_row[f"SUB{sub_idx}_TOT"] = calculated_total_p  # Store raw marks
+            new_row[f"SUB{sub_idx}_PERCENT"] = percent_marks  # Store percentage
             new_row[f"SUB{sub_idx}_GRADE"] = ""
             new_row[f"SUB{sub_idx}_GRADE_POINTS"] = ""
             new_row[f"SUB{sub_idx}_CREDIT"] = row.get(f"CH{i+2}", "") if f"CH{i+2}" in row else row.get(f"CHP{i}", "")
@@ -434,7 +463,8 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
             new_row[f"SUB{sub_idx}_CE_MRKS"] = ce_marks_p
             new_row[f"SUB{sub_idx}_PR_MAX"] = ""
             new_row[f"SUB{sub_idx}_PR_MRKS"] = ""
-            new_row[f"SUB{sub_idx}_TOT"] = calculated_total_p
+            new_row[f"SUB{sub_idx}_TOT"] = calculated_total_p  # Store raw marks
+            new_row[f"SUB{sub_idx}_PERCENT"] = calculated_total_p  # For 100-mark subjects, percent = raw
             new_row[f"SUB{sub_idx}_GRADE"] = ""
             new_row[f"SUB{sub_idx}_GRADE_POINTS"] = ""
             new_row[f"SUB{sub_idx}_CREDIT"] = row.get(f"CHP{i}", "")
@@ -454,11 +484,11 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
     # --- NEW: Process PROJECT subjects (IPROJ, EPROJ, PROJ, PROJMAX, CHPROJ) ---
     for i in range(1, 20):
         # Check for project-related columns with index
-        proj_code = str(row.get(f"PROJ{i}", "")).strip()
-        proj_name = str(row.get(f"PROJNM{i}", "")).strip()
+        proj_code = str(row.get(f"CODPROJ{i}", "")).strip()
+        proj_name = str(row.get(f"SUBPROJ{i}", "")).strip()
         internal_marks = row.get(f"IPROJ{i}", "")
         external_marks = row.get(f"EPROJ{i}", "")
-        total_proj_marks = row.get(f"PROJ{i}", "")  # Total marks column
+        total_proj_marks = row.get(f"PROJ{i}", "")
         
         # Handle PROJMAX with space (e.g., "PROJMAX 1")
         proj_max_marks = ""
@@ -511,13 +541,14 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         # Store project subject data
         new_row[f"SUB{sub_idx}NM"] = proj_name if proj_name else "PROJECT"
         new_row[f"SUB{sub_idx}"] = proj_code if proj_code else f"PROJ{i}"
-        new_row[f"SUB{sub_idx}_TH_MAX"] = row.get(f"EPROJ{i}_MAX", "150") 
-        new_row[f"SUB{sub_idx}_CE_MAX"] = row.get(f"IPROJ{i}_MAX", "50")
-        new_row[f"SUB{sub_idx}_TH_MRKS"] = external_marks if str(external_marks).strip() not in ["", "None"] else ""
-        new_row[f"SUB{sub_idx}_CE_MRKS"] = internal_marks if str(internal_marks).strip() not in ["", "None"] else ""
-        new_row[f"SUB{sub_idx}_PR_MAX"] = proj_max
-        new_row[f"SUB{sub_idx}_PR_MRKS"] = calculated_total_proj
-        new_row[f"SUB{sub_idx}_TOT"] = percent_marks  # Store percentage for grade calculation
+        new_row[f"SUB{sub_idx}_TH_MAX"] = ""
+        new_row[f"SUB{sub_idx}_CE_MAX"] = "150"
+        new_row[f"SUB{sub_idx}_TH_MRKS"] = ""
+        new_row[f"SUB{sub_idx}_CE_MRKS"] = external_marks if str(external_marks).strip() not in ["", "None"] else ""
+        new_row[f"SUB{sub_idx}_PR_MAX"] = "50"
+        new_row[f"SUB{sub_idx}_PR_MRKS"] = internal_marks if str(internal_marks).strip() not in ["", "None"] else ""
+        new_row[f"SUB{sub_idx}_TOT"] = calculated_total_proj  # Store raw marks
+        new_row[f"SUB{sub_idx}_PERCENT"] = percent_marks  # Store percentage for grade calculation
         new_row[f"SUB{sub_idx}_GRADE"] = ""
         new_row[f"SUB{sub_idx}_GRADE_POINTS"] = ""
         new_row[f"SUB{sub_idx}_CREDIT"] = project_credit
@@ -544,6 +575,7 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
             new_row[f"SUB{sub_idx}_CREDIT"] = row.get(f"DCR{i}", "")
             due_total = pd.to_numeric(row.get(f"DPM{i}", ""), errors="coerce")
             new_row[f"SUB{sub_idx}_TOT"] = "" if pd.isna(due_total) else due_total
+            new_row[f"SUB{sub_idx}_PERCENT"] = "" if pd.isna(due_total) else due_total
             new_row["REMARKS"] = row.get(f"DPR{i}", "")
             subject_meta[sub_idx] = "due"
             subject_counter += 1
@@ -565,22 +597,11 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         except:
             pass
     
-    # Check practical subjects (including projects)
-    practical_passing_percent = scheme_config["practical_passing"]
-    for (idx, tot_marks, max_marks) in practical_subjects:
-        try:
-            marks = float(tot_marks)
-            percent = (marks / max_marks) * 100 if max_marks > 0 else 0
-            if percent < practical_passing_percent:
-                failed_subjects.append((idx, marks, max_marks, "practical"))
-        except:
-            pass
-
     # Calculate shortfall
     shortfall = 0
     for (_, marks, max_marks, sub_type) in failed_subjects:
         min_percent = (theory_passing_percent / 100 if sub_type == "theory" 
-                      else practical_passing_percent / 100)
+                      else "")
         shortfall += max(0, (min_percent * max_marks) - marks)
 
     # Initialize grace for theory subjects only
@@ -602,12 +623,13 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
                 new_row[f"SUB{idx}_GRACE"] = f"G-{int(round(grace_given))}"
                 grace_limit -= grace_given
 
-    # --- Calculate grades and points ---
+    # --- Calculate grades and points using PERCENT field ---
     total_credits = 0
     total_credit_points = 0
     
     for sub_idx in subject_meta:
-        marks = new_row.get(f"SUB{sub_idx}_TOT", "")
+        # Use the PERCENT field for grade calculation
+        percent_marks = new_row.get(f"SUB{sub_idx}_PERCENT", "")
         grace_val = new_row.get(f"SUB{sub_idx}_GRACE", "")
 
         if isinstance(grace_val, str) and grace_val.startswith("G-"):
@@ -623,16 +645,23 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         else:
             new_row[f"SUB{sub_idx}_GRACE"] = ""
 
+        # For theory subjects, add grace to percentage
+        if subject_meta[sub_idx] == "theory" and grace_val > 0:
+            try:
+                # Calculate grace percentage based on max marks
+                th_max = float(new_row.get(f"SUB{sub_idx}_TH_MAX", 100))
+                ce_max = float(new_row.get(f"SUB{sub_idx}_CE_MAX", 0))
+                total_max = th_max + ce_max if ce_max > 0 else 100
+                grace_percent = (grace_val / total_max) * 100
+                percent_marks = float(percent_marks) + grace_percent
+            except:
+                pass
+
         # Treat projects and practicals with max as practicals for grading
         is_practical = subject_meta[sub_idx] in ["practical", "practical_with_max", "project"]
 
         grade, gp = compute_grade_and_points(
-            marks,
-            th_max=new_row.get(f"SUB{sub_idx}_TH_MAX", ""),
-            ce_max=new_row.get(f"SUB{sub_idx}_CE_MAX", ""),
-            pr_max=new_row.get(f"SUB{sub_idx}_PR_MAX", ""),
-            total_max=new_row.get(f"SUB{sub_idx}_TOTAL_MAX", ""),
-            grace=int(round(grace_val)),
+            percent_marks,
             is_practical=is_practical,
             scheme_config=scheme_config
         )
@@ -681,7 +710,14 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
 
 def transform_dataframe(df: pd.DataFrame, course: str) -> pd.DataFrame:
     """
-    Transform entire dataframe based on course scheme.
+    Processes entire dataset of student records.
+    
+    Args:
+        df: DataFrame containing raw student records
+        course: Course name to determine grading scheme
+        
+    Returns:
+        pd.DataFrame: Transformed records with computed grades
     """
     scheme_name, scheme_config = get_scheme_for_course(course)
     print(f"Using {scheme_name} for course: {course}")
@@ -694,15 +730,19 @@ def transform_dataframe(df: pd.DataFrame, course: str) -> pd.DataFrame:
 
 
 # --------------------------
-# Local Testing Function
+# Local Testing Configuration
 # --------------------------
 if __name__ == "__main__":
+    """
+    Command-line interface for local testing.
+    Configure input/output paths and course name here.
+    """
     # ========================================
     # CONFIGURATION - Update these values
     # ========================================
-    INPUT_FILE = "MSC CS/MSC4SK6.csv"  # Path to your input file
+    INPUT_FILE = "MSC CS/MSC2SK5.csv"  # Path to your input file
     COURSE_NAME = "M.Sc. COMPUTER SCIENCE"       # Course name
-    OUTPUT_FILE = "MSC CS/MSC4SK6_op.csv"  # Path for output file
+    OUTPUT_FILE = "MSC CS/MSC2SK5_op.csv"  # Path for output file
     # ========================================
     
     print(f"Processing file: {INPUT_FILE}")
