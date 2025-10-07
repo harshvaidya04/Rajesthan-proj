@@ -24,24 +24,37 @@ jobs:
     - name: Deploy to EC2
       run: |
         ssh -o StrictHostKeyChecking=no ubuntu@13.235.120.164 << 'EOF'
-          cd /var/www/html/Rajesthan-proj || exit 1
+          set -e
+          
+          echo "🚀 Starting deployment..."
+          
+          # Navigate to project directory
+          cd /var/www/html/Rajesthan-proj
 
-          # Ensure we are on the right branch
-          git fetch origin
-          git checkout main || git checkout master
-          git reset --hard origin/$(git rev-parse --abbrev-ref HEAD)
+          echo "📦 Pulling latest code..."
+          git pull origin main
 
-          # Install dependencies (Node or Python)
-          if [ -f package.json ]; then
-            npm install --production
-          elif [ -f requirements.txt ]; then
-            source /var/www/html/myevn/bin/activate
-            pip install -r requirements.txt
-          fi
+          echo "🔄 Restarting application..."
+          sudo systemctl restart rajesthan-api.service
 
-          # Restart backend with PM2 (create if not exists)
-          pm2 restart backend || pm2 start npm --name backend -- run start
+          echo "⏳ Waiting for service to start..."
+          sleep 5
 
-          # Save PM2 config so it auto-starts on reboot
-          pm2 save
+          echo "✅ Deployment completed!"
+          sudo systemctl status rajesthan-api.service --no-pager -l
+          
         EOF
+
+    - name: Verify deployment
+      run: |
+        echo "🔍 Verifying deployment..."
+        sleep 5
+        
+        if curl -f http://13.235.120.164:8000/health > /dev/null 2>&1; then
+          echo "✅ Health check passed!"
+        else
+          echo "❌ Health check failed!"
+          exit 1
+        fi
+        
+        echo "🌐 API is live at: http://13.235.120.164:8000"
