@@ -511,8 +511,8 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         # Store project subject data
         new_row[f"SUB{sub_idx}NM"] = proj_name if proj_name else "PROJECT"
         new_row[f"SUB{sub_idx}"] = proj_code if proj_code else f"PROJ{i}"
-        new_row[f"SUB{sub_idx}_TH_MAX"] = ""
-        new_row[f"SUB{sub_idx}_CE_MAX"] = ""
+        new_row[f"SUB{sub_idx}_TH_MAX"] = row.get(f"EPROJ{i}_MAX", "150") 
+        new_row[f"SUB{sub_idx}_CE_MAX"] = row.get(f"IPROJ{i}_MAX", "50")
         new_row[f"SUB{sub_idx}_TH_MRKS"] = external_marks if str(external_marks).strip() not in ["", "None"] else ""
         new_row[f"SUB{sub_idx}_CE_MRKS"] = internal_marks if str(internal_marks).strip() not in ["", "None"] else ""
         new_row[f"SUB{sub_idx}_PR_MAX"] = proj_max
