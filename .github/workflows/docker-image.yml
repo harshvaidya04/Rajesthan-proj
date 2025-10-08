@@ -31,6 +31,10 @@ jobs:
           # Navigate to project directory
           cd /var/www/html/Rajesthan-proj
 
+          # Fix ownership and permissions for git repository
+          sudo chown -R ubuntu:ubuntu /var/www/html/Rajesthan-proj
+          sudo chmod -R 755 /var/www/html/Rajesthan-proj
+
           # Fix git safe directory issue
           git config --global --add safe.directory /var/www/html/Rajesthan-proj
 
