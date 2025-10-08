@@ -1,0 +1,67 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+    - name: Add EC2 to known hosts
+      run: |
+        ssh-keyscan -H 13.235.120.164 >> ~/.ssh/known_hosts
+
+    - name: Deploy to EC2
+      run: |
+        ssh -o StrictHostKeyChecking=no ubuntu@13.235.120.164 << 'EOF'
+          set -e
+          
+          echo "🚀 Starting deployment..."
+          
+          # Navigate to project directory
+          cd /var/www/html/Rajesthan-proj
+
+          # Fix ownership and permissions for git repository
+          sudo chown -R ubuntu:ubuntu /var/www/html/Rajesthan-proj
+          sudo chmod -R 755 /var/www/html/Rajesthan-proj
+
+          # Fix git safe directory issue
+          git config --global --add safe.directory /var/www/html/Rajesthan-proj
+
+          echo "📦 Pulling latest code..."
+          git pull origin main
+
+          echo "🔄 Restarting application..."
+          sudo systemctl restart rajesthan-api.service
+
+          echo "⏳ Waiting for service to start..."
+          sleep 5
+
+          echo "✅ Deployment completed!"
+          sudo systemctl status rajesthan-api.service --no-pager -l
+          
+        EOF
+
+    - name: Verify deployment
+      run: |
+        echo "🔍 Verifying deployment..."
+        sleep 5
+        
+        if curl -f http://13.235.120.164:8000/health > /dev/null 2>&1; then
+          echo "✅ Health check passed!"
+        else
+          echo "❌ Health check failed!"
+          exit 1
+        fi
+        
+        echo "🌐 API is live at: http://13.235.120.164:8000"
