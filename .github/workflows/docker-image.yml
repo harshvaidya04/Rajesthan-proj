@@ -31,6 +31,9 @@ jobs:
           # Navigate to project directory
           cd /var/www/html/Rajesthan-proj
 
+          # Fix git safe directory issue
+          git config --global --add safe.directory /var/www/html/Rajesthan-proj
+
           echo "📦 Pulling latest code..."
           git pull origin main
 
