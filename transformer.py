@@ -613,6 +613,7 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
 
     #  --- New condition: Check if grace should be allowed ---
     try:
+        print()
         grand_total_maximum = float(row.get("GTOT_MAX", 0)) # Grand Total Marks (Example: 600)   
         # row.get("GTOT_MAX", "")
         grand_total_marks: float = row.get("GTOT", "") # student’s grand total obtained marks (Example: 200)            
