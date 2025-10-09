@@ -1,0 +1,78 @@
+# === Python cache files ===
+__pycache__/
+*.py[cod]
+*$py.class
+
+# === Virtual environment ===
+venv/
+env/
+.venv/
+.env/
+
+# === IDE / Editor specific ===
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# === OS specific ===
+.DS_Store
+Thumbs.db
+
+# === Python build artifacts ===
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# === Logs and temp files ===
+*.log
+*.pot
+*.pyproj
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# === Environment variables ===
+.env
+.env.local
+.env.*.local
+
+# === Coverage / testing ===
+.coverage
+htmlcov/
+.tox/
+.nox/
+pytest_cache/
+coverage.xml
+
+# === Type checking / static analysis ===
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# === Jupyter / notebooks (if any) ===
+.ipynb_checkpoints
+
+# === Database / migrations (optional depending on setup) ===
+*.db
+*.sqlite3
+alembic/versions/__pycache__/
+alembic/versions/*.pyc
+
+# === FastAPI specific (optional) ===
+# Compiled templates or uploaded static files (if dynamically generated)
+staticfiles/
+uploads/
+media/
+
+# === Docker ===
+*.pid
+*.seed
+docker-compose.override.yml
+
+# === Poetry / Pipenv / Hatch ===
+.poetry/
+pip-wheel-metadata/
