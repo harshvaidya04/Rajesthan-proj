@@ -613,36 +613,22 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
 
     #  --- New condition: Check if grace should be allowed ---
     try:
-        print()
         grand_total_maximum = float(row.get("GTOT_MAX", 0)) # Grand Total Marks (Example: 600)   
-        # row.get("GTOT_MAX", "")
         grand_total_marks: float = row.get("GTOT", "") # student’s grand total obtained marks (Example: 200)            
         aggregate_passing_percentage = scheme_config["aggregate_passing"]    # passing aggregate threshold (Example: 40)
 
         if (grand_total_maximum > 0):
             percent = (grand_total_marks / grand_total_maximum) * 100
-            print(f"DEBUG_GRACE_PERCENT => Aggregate%={percent:.2f}")
             # Grace allowed only if student is >= aggregate passing percentage
             allow_grace: bool = percent >= aggregate_passing_percentage
-            print("Allow Grace", allow_grace)
         else:
             allow_grace: bool = True
 
-        print(
-            f"DEBUG_GRACE_CONDITION => GTOT={grand_total_marks}, "
-            f"GRAND_TOT_MAX={grand_total_maximum}, Aggregate%={percent:.2f}, "
-            f"Passing%={aggregate_passing_percentage}, AllowGrace={allow_grace}",
-            flush=True
-        )
-
-    # except:
-    #     allow_grace = True
     except Exception as e:
         print(f"Error while checking grace condition: {e}", flush=True)
         allow_grace = True  # fallback
 
     
-    print("Final Allow Grace ----------", allow_grace, flush=True)
     # Distribute grace marks (only to theory subjects)
     if allow_grace and shortfall <= grace_limit:
         for (idx, marks, max_marks, sub_type) in failed_subjects:
