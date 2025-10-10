@@ -229,6 +229,8 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
     else:
         new_row["GRAND_TOT_MRKS"] = grand_tot
         new_row["GRAND_TOT_MAX"] = row.get("TTOT", "")
+
+    new_row["GRAND_TOT_MAX"] = row.get("GTOT_MAX", "")
     
     new_row["TOT_MRKS"] = row.get("GTOT", "")
     new_row["PERCENT"] = row.get("PER", "")
@@ -609,8 +611,26 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         if subject_meta[sub_idx] == "theory":
             new_row[f"SUB{sub_idx}_GRACE"] = "G-0"
 
+    #  --- New condition: Check if grace should be allowed ---
+    try:
+        grand_total_maximum = float(row.get("GTOT_MAX", 0)) # Grand Total Marks (Example: 600)   
+        grand_total_marks: float = row.get("GTOT", "") # student’s grand total obtained marks (Example: 200)            
+        aggregate_passing_percentage = scheme_config["aggregate_passing"]    # passing aggregate threshold (Example: 40)
+
+        if (grand_total_maximum > 0):
+            percent = (grand_total_marks / grand_total_maximum) * 100
+            # Grace allowed only if student is >= aggregate passing percentage
+            allow_grace: bool = percent >= aggregate_passing_percentage
+        else:
+            allow_grace: bool = True
+
+    except Exception as e:
+        print(f"Error while checking grace condition: {e}", flush=True)
+        allow_grace = True  # fallback
+
+    
     # Distribute grace marks (only to theory subjects)
-    if shortfall <= grace_limit:
+    if allow_grace and shortfall <= grace_limit:
         for (idx, marks, max_marks, sub_type) in failed_subjects:
             # Skip if this is a practical_no_grace, practical, practical_with_max, or project subject
             if subject_meta.get(idx) in ["practical_no_grace", "practical", "practical_with_max", "project"]:
@@ -693,8 +713,8 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
             aggregate_passing_percent = scheme_config["aggregate_passing"]
             
             if grand_tot_max > 0:
-                aggregate_percent = (grand_tot_marks / grand_tot_max) * 100
-                if aggregate_percent >= aggregate_passing_percent and sgpa >= 4.0:
+                percent = (grand_tot_marks / grand_tot_max) * 100
+                if percent >= aggregate_passing_percent and sgpa >= 4.0:
                     new_row["RESULT"] = "PASS"
                 else:
                     new_row["RESULT"] = "FAIL"
