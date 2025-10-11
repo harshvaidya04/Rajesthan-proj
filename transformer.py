@@ -229,8 +229,6 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
     else:
         new_row["GRAND_TOT_MRKS"] = grand_tot
         new_row["GRAND_TOT_MAX"] = row.get("TTOT", "")
-
-    new_row["GRAND_TOT_MAX"] = row.get("GTOT_MAX", "")
     
     new_row["TOT_MRKS"] = row.get("GTOT", "")
     new_row["PERCENT"] = row.get("PER", "")
@@ -582,106 +580,125 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
             subject_meta[sub_idx] = "due"
             subject_counter += 1
 
-    # --- Grace marks calculation ---
+    # --- Grace marks calculation (FIXED VERSION WITH DEBUG) ---
     total_theory_max = sum(max_marks for (_, _, max_marks) in theory_subjects)
     grace_limit = min(total_theory_max * 0.01, 6)
-
-    failed_subjects = []
     
-    # Check theory subjects
+    print(f"\n=== GRACE CALCULATION DEBUG ===")
+    print(f"Total theory subjects: {len(theory_subjects)}")
+    print(f"Total theory max marks: {total_theory_max}")
+    print(f"Grace limit: {grace_limit}")
+    print(f"Theory passing percent: {scheme_config['theory_passing']}")
+
+    failed_theory_subjects = []
+    
+    # Check theory subjects for failures
     theory_passing_percent = scheme_config["theory_passing"]
     for (idx, tot_marks, max_marks) in theory_subjects:
         try:
             marks = float(tot_marks)
             percent = (marks / max_marks) * 100 if max_marks > 0 else 0
+            print(f"Subject {idx}: {marks}/{max_marks} = {percent:.2f}% (Pass: {theory_passing_percent}%)")
             if percent < theory_passing_percent:
-                failed_subjects.append((idx, marks, max_marks, "theory"))
-        except:
+                print(f"  -> FAILED! Adding to grace distribution")
+                failed_theory_subjects.append((idx, marks, max_marks, percent))
+        except Exception as e:
+            print(f"Subject {idx}: Error processing - {e}")
             pass
     
-    # Calculate shortfall
-    shortfall = 0
-    for (_, marks, max_marks, sub_type) in failed_subjects:
-        min_percent = (theory_passing_percent / 100 if sub_type == "theory" 
-                      else "")
-        shortfall += max(0, (min_percent * max_marks) - marks)
-
-    # Initialize grace for theory subjects only
+    print(f"\nTotal failed subjects: {len(failed_theory_subjects)}")
+    
+    # Initialize grace for all theory subjects
     for sub_idx in subject_meta:
         if subject_meta[sub_idx] == "theory":
-            new_row[f"SUB{sub_idx}_GRACE"] = "G-0"
+            new_row[f"SUB{sub_idx}_GRACE"] = ""
 
-    #  --- New condition: Check if grace should be allowed ---
-    try:
-        grand_total_maximum = float(row.get("GTOT_MAX", 0)) # Grand Total Marks (Example: 600)   
-        grand_total_marks: float = row.get("GTOT", "") # student’s grand total obtained marks (Example: 200)            
-        aggregate_passing_percentage = scheme_config["aggregate_passing"]    # passing aggregate threshold (Example: 40)
-
-        if (grand_total_maximum > 0):
-            percent = (grand_total_marks / grand_total_maximum) * 100
-            # Grace allowed only if student is >= aggregate passing percentage
-            allow_grace: bool = percent >= aggregate_passing_percentage
+    # Calculate and distribute grace marks
+    if failed_theory_subjects:
+        # Calculate how much grace each failed subject needs
+        grace_distribution = []
+        total_shortfall = 0
+        
+        print(f"\n=== CALCULATING GRACE DISTRIBUTION ===")
+        for (idx, marks, max_marks, current_percent) in failed_theory_subjects:
+            # Calculate marks needed to reach passing percentage
+            passing_marks = (theory_passing_percent / 100) * max_marks
+            shortfall_marks = passing_marks - marks
+            
+            print(f"Subject {idx}: Needs {passing_marks:.2f} to pass, has {marks}, shortfall: {shortfall_marks:.2f}")
+            
+            # Ensure we don't give negative grace
+            if shortfall_marks > 0:
+                grace_distribution.append((idx, max_marks, shortfall_marks))
+                total_shortfall += shortfall_marks
+        
+        print(f"\nTotal shortfall: {total_shortfall:.2f} marks")
+        print(f"Grace limit: {grace_limit:.2f} marks (same for all subjects)")
+        
+        # MODIFIED LOGIC: Give grace to subjects that need <= grace limit
+        # Each subject gets evaluated independently against the FULL grace limit
+        if grace_distribution:
+            print(f"\n=== DISTRIBUTING GRACE ===")
+            
+            # Sort by shortfall (smallest first) for consistent ordering
+            grace_distribution.sort(key=lambda x: x[2])
+            
+            # Evaluate each subject independently against the FULL grace limit
+            for (idx, max_marks, shortfall_marks) in grace_distribution:
+                if shortfall_marks <= grace_limit:
+                    # This subject can pass with available grace
+                    grace_value = round(shortfall_marks)
+                    new_row[f"SUB{idx}_GRACE"] = f"G-{grace_value}"
+                    print(f"Subject {idx}: Giving {grace_value} grace marks (needs {shortfall_marks:.2f}, limit: {grace_limit})")
+                else:
+                    # This subject needs more than the grace limit
+                    print(f"Subject {idx}: NO grace (needs {shortfall_marks:.2f}, exceeds limit: {grace_limit})")
         else:
-            allow_grace: bool = True
-
-    except Exception as e:
-        print(f"Error while checking grace condition: {e}", flush=True)
-        allow_grace = True  # fallback
-
+            print(f"\n=== NO VALID GRACE DISTRIBUTION ===")
+    else:
+        print(f"\n=== NO FAILED SUBJECTS ===")
     
-    # Distribute grace marks (only to theory subjects)
-    if allow_grace and shortfall <= grace_limit:
-        for (idx, marks, max_marks, sub_type) in failed_subjects:
-            # Skip if this is a practical_no_grace, practical, practical_with_max, or project subject
-            if subject_meta.get(idx) in ["practical_no_grace", "practical", "practical_with_max", "project"]:
-                continue
-                
-            min_percent = theory_passing_percent / 100
-            needed = max(0, (min_percent * max_marks) - marks)
-            if needed > 0 and grace_limit > 0:
-                grace_given = min(needed, grace_limit)
-                new_row[f"SUB{idx}_GRACE"] = f"G-{int(round(grace_given))}"
-                grace_limit -= grace_given
+    print(f"=== END GRACE CALCULATION ===\n")
 
-    # --- Calculate grades and points using PERCENT field ---
+    # --- Calculate grades and points using PERCENT field (with grace applied) ---
     total_credits = 0
     total_credit_points = 0
     
     for sub_idx in subject_meta:
         # Use the PERCENT field for grade calculation
         percent_marks = new_row.get(f"SUB{sub_idx}_PERCENT", "")
-        grace_val = new_row.get(f"SUB{sub_idx}_GRACE", "")
+        grace_str = new_row.get(f"SUB{sub_idx}_GRACE", "")
 
-        if isinstance(grace_val, str) and grace_val.startswith("G-"):
+        # Parse grace value and apply it to percentage
+        grace_percent_adjustment = 0
+        if isinstance(grace_str, str) and grace_str.startswith("G-"):
             try:
-                grace_val = float(grace_val.replace("G-", ""))
+                grace_marks = float(grace_str.replace("G-", ""))
+                
+                # For theory subjects, convert grace marks to percentage
+                if subject_meta[sub_idx] == "theory":
+                    # Get max marks for this theory subject
+                    th_max = float(new_row.get(f"SUB{sub_idx}_TH_MAX", 70))
+                    ce_max = float(new_row.get(f"SUB{sub_idx}_CE_MAX", 30))
+                    total_max = th_max + ce_max
+                    
+                    # Convert grace marks to percentage points
+                    grace_percent_adjustment = (grace_marks / total_max) * 100
             except:
-                grace_val = 0
-        else:
-            grace_val = 0
+                grace_percent_adjustment = 0
 
-        if grace_val > 0:
-            new_row[f"SUB{sub_idx}_GRACE"] = f"G-{int(grace_val)}"
-        else:
-            new_row[f"SUB{sub_idx}_GRACE"] = ""
+        # Apply grace to percentage for grade calculation
+        try:
+            adjusted_percent = float(percent_marks) + grace_percent_adjustment
+        except:
+            adjusted_percent = percent_marks
 
-        # For theory subjects, add grace to percentage
-        if subject_meta[sub_idx] == "theory" and grace_val > 0:
-            try:
-                # Calculate grace percentage based on max marks
-                th_max = float(new_row.get(f"SUB{sub_idx}_TH_MAX", 100))
-                ce_max = float(new_row.get(f"SUB{sub_idx}_CE_MAX", 0))
-                total_max = th_max + ce_max if ce_max > 0 else 100
-                grace_percent = (grace_val / total_max) * 100
-                percent_marks = float(percent_marks) + grace_percent
-            except:
-                pass
+        # Determine if this is a practical subject for grading purposes
+        is_practical = subject_meta[sub_idx] in ["practical", "practical_with_max", "project", "practical_no_grace"]
 
-        # Treat projects and practicals with max as practicals for grading
-        is_practical = subject_meta[sub_idx] in ["practical", "practical_with_max", "project"]
-
+        # Calculate grade and points
         grade, gp = compute_grade_and_points(
-            percent_marks,
+            adjusted_percent,
             is_practical=is_practical,
             scheme_config=scheme_config
         )
@@ -689,6 +706,7 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         new_row[f"SUB{sub_idx}_GRADE"] = grade
         new_row[f"SUB{sub_idx}_GRADE_POINTS"] = gp
 
+        # Calculate credit points
         try:
             credit = float(new_row.get(f"SUB{sub_idx}_CREDIT", 0))
         except:
@@ -699,25 +717,34 @@ def transform_row(row: Dict[str, Any], scheme_config: Dict[str, Any]) -> Dict[st
         total_credits += credit
         total_credit_points += credit_points
 
-    # --- Calculate SGPA and result ---
+    # --- Calculate SGPA and final result ---
     if total_credits > 0:
         new_row["TOT_CREDIT"] = total_credits
         new_row["TOT_CREDIT_POINTS"] = total_credit_points
         sgpa = total_credit_points / total_credits
         new_row["SGPA"] = round(sgpa, 2)
         
-        # Overall result based on aggregate passing criteria
+        # Determine overall result
         try:
             grand_tot_marks = float(new_row.get("GRAND_TOT_MRKS", 0))
             grand_tot_max = float(new_row.get("GRAND_TOT_MAX", 0))
             aggregate_passing_percent = scheme_config["aggregate_passing"]
             
+            # Check if any subject has F grade
+            has_failure = False
+            for sub_idx in subject_meta:
+                if new_row.get(f"SUB{sub_idx}_GRADE", "") == "F":
+                    has_failure = True
+                    break
+            
             if grand_tot_max > 0:
-                percent = (grand_tot_marks / grand_tot_max) * 100
-                if percent >= aggregate_passing_percent and sgpa >= 4.0:
+                aggregate_percent = (grand_tot_marks / grand_tot_max) * 100
+                if aggregate_percent >= aggregate_passing_percent and not has_failure:
                     new_row["RESULT"] = "PASS"
                 else:
                     new_row["RESULT"] = "FAIL"
+            else:
+                new_row["RESULT"] = "FAIL" if has_failure else "PASS"
         except:
             pass
     else:
@@ -760,9 +787,9 @@ if __name__ == "__main__":
     # ========================================
     # CONFIGURATION - Update these values
     # ========================================
-    INPUT_FILE = "MSC CS/MSC2SK5.csv"  # Path to your input file
-    COURSE_NAME = "M.Sc. COMPUTER SCIENCE"       # Course name
-    OUTPUT_FILE = "MSC CS/MSC2SK5_op.csv"  # Path for output file
+    INPUT_FILE = "CBCS/ZOOLOGY 2024/(02) MSZO2S.xlsx"  # Path to your input file
+    COURSE_NAME = "M.Sc. ZOOLOGY"       # Course name
+    OUTPUT_FILE = "CBCS/ZOOLOGY 2024/(02) MSZO2S_op.csv"  # Path for output file
     # ========================================
     
     print(f"Processing file: {INPUT_FILE}")
